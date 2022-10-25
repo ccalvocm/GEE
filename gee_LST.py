@@ -27,6 +27,7 @@ i_date='2021-10-31'
 i_date='2013-03-18'
 i_date='2000-02-24'
 f_date=str(datetime.date.today().strftime("%Y-%m-%d"))
+f_date='2018-12-31'
 banda='ST_B10'
 banda='LST_Day_1km'
 scale=30
@@ -71,26 +72,30 @@ def getCelsius(image):
 
     return(image)
 
-landsat_data = ee.ImageCollection(dict_product.get(list(dict_product.keys())[0])) \
-    .filterDate(i_date,f_date).map(getCelsius).map(addDate)
-  
-results=landsat_data.filterBounds(ee_fc).select('LST').map(addDate)\
-.map(rasterExtraction).flatten()
-sample_result=results.first().getInfo()
-#extract the properties column from feature collection
-#column order may not be as out sample data order
-
-columns=list(sample_result['properties'].keys())
-#order data columns as per sample data order
-#You can modify this for better optimizaction
-column_df=list(df_est.columns)
-column_df.extend(['LST','date'])
-nested_list = results.reduceColumns(ee.Reducer.toList(len(column_df)),
-                                    column_df).values().get(0)
-data = nested_list.getInfo()
-df = pd.DataFrame(data, columns=column_df)
-df.index=pd.to_datetime(df['date'],format="%Y%m%d")
-df=df[[x for x in df.columns if x!='date']]
-df_pivot=pd.pivot_table(df,values='LST',index=df.index,columns=df['COD_BNA'])
-print(df_pivot.head())
-df_pivot.to_excel(os.path.join('.','LST_'+list(dict_product.keys())[0]+'.xlsx'))
+def main():
+    landsat_data = ee.ImageCollection(dict_product.get(list(dict_product.keys())[0])) \
+        .filterDate(i_date,f_date).map(getCelsius).map(addDate)
+      
+    results=landsat_data.filterBounds(ee_fc).select('LST').map(addDate)\
+    .map(rasterExtraction).flatten()
+    sample_result=results.first().getInfo()
+    #extract the properties column from feature collection
+    #column order may not be as out sample data order
+    
+    columns=list(sample_result['properties'].keys())
+    #order data columns as per sample data order
+    #You can modify this for better optimizaction
+    column_df=list(df_est.columns)
+    column_df.extend(['LST','date'])
+    nested_list = results.reduceColumns(ee.Reducer.toList(len(column_df)),
+                                        column_df).values().get(0)
+    data = nested_list.getInfo()
+    df = pd.DataFrame(data, columns=column_df)
+    df.index=pd.to_datetime(df['date'],format="%Y%m%d")
+    df=df[[x for x in df.columns if x!='date']]
+    df_pivot=pd.pivot_table(df,values='LST',index=df.index,columns=df['COD_BNA'])
+    print(df_pivot.head())
+    df_pivot.to_excel(os.path.join('.','LST_'+list(dict_product.keys())[0]+'.xlsx'))
+    
+if __name__=='__main__':
+    main()
