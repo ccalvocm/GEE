@@ -1,0 +1,16 @@
+var dataset = ee.Image('USGS/SRTMGL1_003');
+var projection = dataset.projection().getInfo();
+var elevation = dataset.select('elevation').clip(table);
+var slope = ee.Terrain.slope(elevation).clip(table);
+Map.addLayer(slope, {min: 0, max: 60}, 'slope');
+Map.addLayer(elevation,{min:0, max:5000}, 'slope');
+//Export.image.toDrive(slope, 'slope');
+Export.image.toDrive({
+  image: elevation,
+  description: 'DEM_30',
+  scale: 100,
+  region: table,
+  crs: projection.crs,
+  crsTransform: projection.transform,
+  maxPixels: 1E10
+});

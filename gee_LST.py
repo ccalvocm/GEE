@@ -11,7 +11,7 @@ import datetime
 import pandas as pd
 
 os.chdir(r'C:\Users\ccalvo\Downloads')
-service_account = 'gee-276@rigoteo-348620.iam.gserviceaccount.com '
+service_account = 'gee-276@rigoteo-348620.iam.gserviceaccount.com'
 # registrarse en https://signup.earthengine.google.com/#!/service_accounts
 folder_json = os.path.join('.','rigoteo-348620-3d55866eac07.json')
 credentials = ee.ServiceAccountCredentials(service_account, folder_json)
