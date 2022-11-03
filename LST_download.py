@@ -16,10 +16,10 @@ from shapely.geometry import box
 import requests
 
 def login():
-    os.chdir(r'C:\Users\Carlos\Downloads')
+    os.chdir(r'C:\Users\ccalvo\Downloads')
     service_account = 'gee-276@rigoteo-348620.iam.gserviceaccount.com'
     # registrarse en https://signup.earthengine.google.com/#!/service_accounts
-    folder_json = os.path.join('.','rigoteo-348620-afd1b6027d2a.json')
+    folder_json = os.path.join('.','rigoteo-348620-3d55866eac07.json')
     credentials = ee.ServiceAccountCredentials(service_account, folder_json)
     ee.Initialize(credentials)
 
@@ -29,7 +29,7 @@ def feature2ee(gdf):
     try:
         
         # box from bounds
-        xmin,ymin,xmax,ymax=gdf.buffer(1e-2).total_bounds
+        xmin,ymin,xmax,ymax=gdf.buffer(1e-3).total_bounds
         # convert to polygon
         geom=gpd.GeoDataFrame([],geometry=[box(*gdf.total_bounds)])
                 
@@ -90,7 +90,7 @@ def feature2ee(gdf):
 
 def load_watershed():
     #check if the file is shapefile or CSV
-      path=r'E:\CIREN\OneDrive - ciren.cl\Of hidrica\AOHIA_ZC\SIG\Mapoteca DGA\Mapoteca_DGA\02_DGA\Cuencas\Cuencas_DARH_2015_SubCuencas.shp'
+      path=r'G:\OneDrive - ciren.cl\Of hidrica\AOHIA_ZC\SIG\Mapoteca DGA\Mapoteca_DGA\02_DGA\Cuencas\Cuencas_DARH_2015_SubCuencas.shp'
       scuencas=gpd.read_file(path)
       # reproyectar a geograficas
       scuencas.to_crs(epsg='4326',inplace=True)
@@ -99,7 +99,7 @@ def load_watershed():
   
 def load_watershedBNA():
     #check if the file is shapefile or CSV
-      path=r'E:\CIREN\OneDrive - ciren.cl\Of hidrica\AOHIA_ZC\SIG\Mapoteca DGA\Mapoteca_DGA\02_DGA\Cuencas\Cuencas_BNA_Total\Cuencas_BNA_Total.shp'
+      path=r'G:\OneDrive - ciren.cl\Of hidrica\AOHIA_ZC\SIG\Mapoteca DGA\Mapoteca_DGA\02_DGA\Cuencas\Cuencas_BNA_Total\Cuencas_BNA_Total.shp'
       scuencas=gpd.read_file(path)
       # reproyectar a geograficas
       scuencas.to_crs(epsg='4326',inplace=True)
@@ -107,19 +107,51 @@ def load_watershedBNA():
       return scuencas
              
 def load_glaciers():
-      path=r'E:\CIREN\OneDrive - ciren.cl\2021_FONDEF_ID21I10305\Trabajo_de_Campo\02.SIG\Inventario_glaciares_DGA\IPG2022\IPG2022.shp'
+      path=r'G:\OneDrive - ciren.cl\2021_FONDEF_ID21I10305\Trabajo_de_Campo\02.SIG\Inventario_glaciares_DGA\IPG2022\IPG2022.shp'
       scuencas=gpd.read_file(path)
       # reproyectar a geograficas
       scuencas.to_crs(epsg='4326',inplace=True)
             
       return scuencas
+
+def download(gdf,landsat_data,banda,scale,codSubcuenca):
+    # subcuenca_test
+    ee_fc=feature2ee(gdf)
+
+    results=landsat_data.filterBounds(ee_fc).select(banda).filterBounds(ee_fc)
     
-def product():
-    dict_product={'Landsat8':'LANDSAT/LC08/C02/T1_L2'}
-    i_date='2022-10-13'
-    f_date=str(datetime.date.today().strftime("%Y-%m-%d"))
-    banda='ST_B10'
-    scale=30
+    # https://stackoverflow.com/questions/46943061/how-to-iterate-over-and-download-each-image-in-an-image-collection-from-the-goog
+    # This is OK for small collections
+    collectionList = results.toList(results.size())
+    collectionSize = collectionList.size().getInfo()
+    print(collectionSize)
+    for i in range(collectionSize):
+        image = ee.Image(collectionList.get(i))
+        image_name = image.get('system:index').getInfo()
+        print(i)
+        print(image_name)
+        img_name = "LANDSAT8_LST_" + str(image_name)
+        url = image.getDownloadUrl({
+                        'name':img_name,
+                        'scale': scale,
+                        'crs': 'EPSG:4326',
+                        'region': ee_fc.geometry(),
+                        'format':"GEO_TIFF"
+                    })
+        print(url)
+        r = requests.get(url, stream=True)
+        try:
+            folder=os.path.join('.','LST',codSubcuenca)
+            os.mkdir(os.path.abspath(folder))
+        except:
+            pass
+        filenameTif = os.path.join(folder,img_name + '.tif')
+        with open(filenameTif, "wb") as fd:
+                for chunk in r.iter_content(chunk_size=1024):
+                    fd.write(chunk)
+        fd.close()     
+
+def product(dict_product,i_date,f_date,banda,scale):
     
     landsat_data = ee.ImageCollection(dict_product.get(list(dict_product.keys())[0])) \
     .filterDate(i_date,f_date)
@@ -130,52 +162,32 @@ def product():
     
     cuencaTranslate=gpd.sjoin(cuencasBNA,cuencas)
 
-    subcuencasGlaciares=glaciares['COD_SCUEN'][(glaciares['COD_SCUEN'].str[:2]<='05') & (glaciares['COD_SCUEN'].str[:2]>='03')].unique()
+    subcuencasGlaciares=glaciares['COD_SCUEN'][(glaciares['COD_SCUEN'].str[:2]<='999') & (glaciares['COD_SCUEN'].str[:2]>='00')].unique()
     
     for subcuenca in subcuencasGlaciares:
         subCuencaSjoin=cuencaTranslate[cuencaTranslate['COD_SUBC']==subcuenca].sort_values(by='Shape_Area_right',ascending=False)
         codSubcuenca=subCuencaSjoin.iloc[0]['COD_SCUEN']
         gdf=cuencas[cuencas['COD_SCUEN']==codSubcuenca]
-        # subcuenca_test
-        ee_fc=feature2ee(gdf)
-    
-        results=landsat_data.filterBounds(ee_fc).select(banda).filterBounds(ee_fc)
-        
-        # https://stackoverflow.com/questions/46943061/how-to-iterate-over-and-download-each-image-in-an-image-collection-from-the-goog
-        # This is OK for small collections
-        collectionList = results.toList(results.size())
-        collectionSize = collectionList.size().getInfo()
-        print(collectionSize)
-        for i in range(collectionSize):
-            image = ee.Image(collectionList.get(i))
-            image_name = image.get('system:index').getInfo()
-            print(i)
-            print(image_name)
-            img_name = "LANDSAT8_LST_" + str(image_name)
-            url = image.getDownloadUrl({
-                            'name':img_name,
-                            'scale': scale,
-                            'crs': 'EPSG:4326',
-                            'region': ee_fc.geometry(),
-                            'format':"GEO_TIFF"
-                        })
-            print(url)
-            r = requests.get(url, stream=True)
-            try:
-                folder=os.path.join('.','LST',codSubcuenca)
-                os.mkdir(folder)
-            except:
-                pass
-            filenameTif = os.path.join(folder,img_name + '.tif')
-            with open(filenameTif, "wb") as fd:
-                    for chunk in r.iter_content(chunk_size=1024):
-                        fd.write(chunk)
-            fd.close()
+
+        try:
+            download(gdf,landsat_data,banda,scale,codSubcuenca)
+        except ee.ee_exception.EEException as err:
+            if 'Total request size' in str(err):
+                
+                print('Caught')
 
 def main():
     # log in gee
     login()
-    product()
+    
+    # process
+    dict_product={'Landsat8':'LANDSAT/LC08/C02/T1_L2'}
+    i_date='2013-03-18'
+    f_date=str(datetime.date.today().strftime("%Y-%m-%d"))
+    banda='ST_B10'
+    scale=30
+    
+    product(dict_product,i_date,f_date,banda,scale)
 
 if __name__=='__main__':
     main()
