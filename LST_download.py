@@ -29,64 +29,25 @@ def feature2ee(gdf):
     try:
         
         # box from bounds
-        xmin,ymin,xmax,ymax=gdf.buffer(1e-3).total_bounds
+        xmin,ymin,xmax,ymax=gdf.buffer(1e-2).total_bounds
         # convert to polygon
         geom=gpd.GeoDataFrame([],geometry=[box(*gdf.total_bounds)])
                 
-        g = [i for i in geom.geometry]
-        features=[]
-        
         #for Polygon geo data type
-        if (geom.geom_type.iloc[0] == 'Polygon'):
-            for i in range(len(g)):
-                g = [i for i in geom.geometry]
-                x,y = g[i].exterior.coords.xy
-                cords = np.dstack((x,y)).tolist()
+        g = geom.geometry.iloc[0]
+        x,y = g.exterior.coords.xy
+        cords = np.dstack((x[:-1],y[:-1])).tolist()
 
-                g=ee.Geometry.Polygon(cords)
-                feature = ee.Feature(g)
-                features.append(feature)
-            print("done")
+        g=ee.Geometry.Polygon(cords)
+        feature = ee.Feature(g)
+        # features.append(feature)
+        print("done")
 
-            ee_object = ee.FeatureCollection(features)
+        ee_object = ee.FeatureCollection(feature)
 
-            return ee_object
+        return ee_object
     except:
         return None
-
-# def getCelsius(image):
-    
-#     # import rioxarray
-
-#     # raster=rioxarray.open_rasterio(path)
-    
-#     # with rasterio.open (path, "r+") as img:
-#     #     band = np.zeros(shape=(img.width, img.height))
-
-#     # img.write (band, indexes = 7)
-    
-#     # with rasterio.open(path, "r+") as src:
-#     #        src.nodata = np.nan
-#     #        print(src.read(masked=True))
-#     #        print(src.nodata)
-    
-
-#     with rasterio.open(path, "r+") as src:
-#         data = src.read((1))
-#         data2=np.where(data>0, data*0.00341802-124.14999999999998,data)
-#         src.write(data2, indexes = 1)
-    
-    
-#     # LST
-#     lst = image.select('ST_B10').multiply(0.00341802).add(149.0).add(-273.15)\
-#     .rename("LST")
-#     # image = image.addBands(lst)
-
-#     return lst
-
-# def clip(image):
-#     feature = image.clip(ee_fc)
-#     return feature
 
 def load_watershed():
     #check if the file is shapefile or CSV
@@ -114,11 +75,11 @@ def load_glaciers():
             
       return scuencas
 
-def download(gdf,landsat_data,banda,scale,codSubcuenca):
+def download(gdf,landsat_data,banda,scale,codSubcuenca,i_date,f_date):
     # subcuenca_test
     ee_fc=feature2ee(gdf)
 
-    results=landsat_data.filterBounds(ee_fc).select(banda).filterBounds(ee_fc)
+    results=landsat_data.filterBounds(ee_fc).select(banda).filterDate(i_date,f_date)
     
     # https://stackoverflow.com/questions/46943061/how-to-iterate-over-and-download-each-image-in-an-image-collection-from-the-goog
     # This is OK for small collections
@@ -130,13 +91,15 @@ def download(gdf,landsat_data,banda,scale,codSubcuenca):
         image_name = image.get('system:index').getInfo()
         print(i)
         print(image_name)
-        img_name = "LANDSAT8_LST_" + str(image_name)
+        img_name = "LST_" + str(image_name)
         url = image.getDownloadUrl({
                         'name':img_name,
                         'scale': scale,
                         'crs': 'EPSG:4326',
                         'region': ee_fc.geometry(),
-                        'format':"GEO_TIFF"
+                        'format':"GEO_TIFF",
+                        'bands':banda,
+                        'filePerBand':True
                     })
         print(url)
         r = requests.get(url, stream=True)
@@ -149,32 +112,42 @@ def download(gdf,landsat_data,banda,scale,codSubcuenca):
         with open(filenameTif, "wb") as fd:
                 for chunk in r.iter_content(chunk_size=1024):
                     fd.write(chunk)
-        fd.close()     
+        fd.close()
+        toCelsius(filenameTif)
+
+def splitGdf(gdf):
+
+    # box from bounds
+    xmin,ymin,xmax,ymax=gdf.total_bounds
+    # convert to polygon
+    geom=gpd.GeoDataFrame([],geometry=[box(*gdf.total_bounds)])
+    
 
 def product(dict_product,i_date,f_date,banda,scale):
     
-    landsat_data = ee.ImageCollection(dict_product.get(list(dict_product.keys())[0])) \
-    .filterDate(i_date,f_date)
-    
-    cuencas=load_watershed()
-    cuencasBNA=load_watershedBNA()
+    landsat_data=ee.ImageCollection(dict_product.get(list(dict_product.keys())[0]))
     glaciares=load_glaciers()
+    subcuencasGlaciares=glaciares['COD_CUEN'][(glaciares['COD_CUEN'].str[:2]<='05') & (glaciares['COD_CUEN'].str[:2]>='03')].unique()
     
-    cuencaTranslate=gpd.sjoin(cuencasBNA,cuencas)
-
-    subcuencasGlaciares=glaciares['COD_SCUEN'][(glaciares['COD_SCUEN'].str[:2]<='999') & (glaciares['COD_SCUEN'].str[:2]>='00')].unique()
-    
-    for subcuenca in subcuencasGlaciares:
-        subCuencaSjoin=cuencaTranslate[cuencaTranslate['COD_SUBC']==subcuenca].sort_values(by='Shape_Area_right',ascending=False)
-        codSubcuenca=subCuencaSjoin.iloc[0]['COD_SCUEN']
-        gdf=cuencas[cuencas['COD_SCUEN']==codSubcuenca]
+    for cuenca in subcuencasGlaciares:
+        # subCuencaSjoin=cuencaTranslate[cuencaTranslate['COD_SUBC']==subcuenca].sort_values(by='Shape_Area_right',ascending=False)
+        # codSubcuenca=subCuencaSjoin.iloc[0]['COD_SCUEN']
+        gdf=glaciares[glaciares['COD_CUEN']==cuenca]
 
         try:
-            download(gdf,landsat_data,banda,scale,codSubcuenca)
+            download(gdf,landsat_data,banda,scale,cuenca,i_date,f_date)
         except ee.ee_exception.EEException as err:
             if 'Total request size' in str(err):
-                
                 print('Caught')
+
+def toCelsius(path):
+    import rioxarray as rxr
+    import numpy as np
+    raster=rxr.open_rasterio(path)
+    data2=np.where(raster.data>0, raster.data*0.00341802-124.14999999999998,np.nan)
+    raster.data=data2
+    raster.rio.to_raster(path.replace('.tif','_celsisus.tif'))
+    return None
 
 def main():
     # log in gee
