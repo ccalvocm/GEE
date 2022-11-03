@@ -104,7 +104,7 @@ def download(gdf,landsat_data,banda,scale,codSubcuenca,i_date,f_date):
         print(url)
         r = requests.get(url, stream=True)
         try:
-            folder=os.path.join('.','LST',codSubcuenca)
+            folder=os.path.join('..','LST',codSubcuenca)
             os.mkdir(os.path.abspath(folder))
         except:
             pass
@@ -146,10 +146,12 @@ def toCelsius(path):
     raster=rxr.open_rasterio(path)
     data2=np.where(raster.data>0, raster.data*0.00341802-124.14999999999998,np.nan)
     raster.data=data2
-    raster.rio.to_raster(path.replace('.tif','_celsisus.tif'))
-    return None
+    raster.rio.to_raster(path.replace('.tif','_celsius.tif'))
+    return None 
 
 def main():
+    os.chdir(r'G:')
+    
     # log in gee
     login()
     
