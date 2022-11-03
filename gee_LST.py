@@ -21,15 +21,14 @@ ee.Initialize(credentials)
 dict_product={'Landsat9':'LANDSAT/LC09/C02/T1_L2'}
 dict_product={'Landsat8':'LANDSAT/LC08/C02/T1_L2'}
 dict_product={'MODIS_Terra':'MODIS/061/MOD11A1'}
-
+# dict_product={'MODIS_Aqua':'MODIS/061/MYD11A1'}
 # Final date of interest (exclusive).
 i_date='2021-10-31'
 i_date='2013-03-18'
 i_date='2000-02-24'
 f_date=str(datetime.date.today().strftime("%Y-%m-%d"))
-f_date='2018-12-31'
 banda='ST_B10'
-banda='LST_Day_1km'
+banda='LST_Night_1km'
 scale=30
 scale=1e3
 # Define the urban location of interest as a point near Lyon, France.
@@ -95,7 +94,7 @@ def main():
     df=df[[x for x in df.columns if x!='date']]
     df_pivot=pd.pivot_table(df,values='LST',index=df.index,columns=df['COD_BNA'])
     print(df_pivot.head())
-    df_pivot.to_excel(os.path.join('.','LST_'+list(dict_product.keys())[0]+'.xlsx'))
+    df_pivot.to_excel(os.path.join('.','LST_'+list(dict_product.keys())[0]+'_night.xlsx'))
     
 if __name__=='__main__':
     main()
