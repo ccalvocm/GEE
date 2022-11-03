@@ -175,7 +175,7 @@ def product():
 def main():
     # log in gee
     login()
-    
+    product()
 
 if __name__=='__main__':
     main()
