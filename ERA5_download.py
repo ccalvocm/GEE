@@ -56,8 +56,6 @@ def load_watershed():
 def download(gdf,landsat_data,banda,scale,codSubcuenca,i_date,f_date):
     # subcuenca_test
     ee_fc=feature2ee(gdf)
-
-    results=landsat_data.filterBounds(ee_fc).select(banda).filterDate(i_date,f_date)
     
     # samplear la region
     def rasterExtraction(image):
@@ -71,10 +69,8 @@ def download(gdf,landsat_data,banda,scale,codSubcuenca,i_date,f_date):
         return image.addBands(ee.Image(img_date).rename('date').toInt())
     
     
-    data=ee.ImageCollection(dict_product.get(list(dict_product.keys())[0])) \
-    .filterDate(i_date,f_date).map(addDate)
       
-    results=data.filterBounds(ee_fc).select(banda).map(addDate)\
+    results=landsat_data.filterBounds(ee_fc).select(banda).map(addDate)\
     .map(rasterExtraction).flatten()
     sample_result=results.first().getInfo()
     #extract the properties column from feature collection
@@ -143,7 +139,8 @@ def product(dict_product,i_date,f_date,banda,scale):
         pass
 
         try:
-            download(gdf,landsat_data,banda,scale,gdf.loc['COD_CUENCA'][0],i_date,f_date)
+            download(landsat_data,gdf,landsat_data,banda,scale,gdf.loc['COD_CUENCA'][0],
+                     i_date,f_date)
         except ee.ee_exception.EEException as err:
             if 'Total request size' in str(err):
                 print('Caught')
