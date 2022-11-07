@@ -41,7 +41,6 @@ def feature2ee(gdf):
         g=ee.Geometry.Polygon(cords)
         feature = ee.Feature(g)
         # features.append(feature)
-        print("done")
 
         ee_object = ee.FeatureCollection(feature)
 
@@ -75,7 +74,7 @@ def load_glaciers():
             
       return scuencas
 
-def download(gdf,landsat_data,banda,scale,codSubcuenca,i_date,f_date):
+def download(gdf,landsat_data,banda,scale,codcuenca,i_date,f_date):
     # subcuenca_test
     ee_fc=feature2ee(gdf)
 
@@ -85,11 +84,9 @@ def download(gdf,landsat_data,banda,scale,codSubcuenca,i_date,f_date):
     # This is OK for small collections
     collectionList = results.toList(results.size())
     collectionSize = collectionList.size().getInfo()
-    print(collectionSize)
     for i in range(collectionSize):
         image = ee.Image(collectionList.get(i))
         image_name = image.get('system:index').getInfo()
-        print(i)
         print(image_name)
         img_name = "LST_" + str(image_name)
         url = image.getDownloadUrl({
@@ -101,10 +98,9 @@ def download(gdf,landsat_data,banda,scale,codSubcuenca,i_date,f_date):
                         'bands':banda,
                         'filePerBand':True
                     })
-        print(url)
         r = requests.get(url, stream=True)
+        folder=os.path.join('..','LST',codcuenca)
         try:
-            folder=os.path.join('..','LST',codSubcuenca)
             os.mkdir(os.path.abspath(folder))
         except:
             pass
@@ -143,17 +139,23 @@ def product(dict_product,i_date,f_date,banda,scale):
 def toCelsius(path):
     import rioxarray as rxr
     import numpy as np
-    raster=rxr.open_rasterio(path)
+    try:
+        raster=rxr.open_rasterio(path)
+    except:
+        os.remove(path)
+        return None 
+
     data2=np.where(raster.data>0, raster.data*0.00341802-124.14999999999998,np.nan)
     raster.data=data2
     raster.rio.to_raster(path.replace('.tif','_celsius.tif'))
-    return None 
 
 def main():
-    os.chdir(r'G:')
-    
+   
     # log in gee
     login()
+
+    # chdir
+    os.chdir(r'G:\GEE')
     
     # process
     dict_product={'Landsat8':'LANDSAT/LC08/C02/T1_L2'}
