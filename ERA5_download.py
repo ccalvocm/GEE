@@ -58,27 +58,32 @@ def addDate(image):
     img_date = ee.Number.parse(img_date.format('YYYYMMdd'))
     return image.addBands(ee.Image(img_date).rename('date').toInt())
     
-def getData(landsat_data,banda,i_date,f_date,ee_fc,scale):
+def getData(gdf,landsat_data,banda,i_date,f_date,ee_fc,scale):
     
-    def point_mean(img):
-        mean = img.reduceRegion(reducer=ee.Reducer.mean(),
-                                geometry=ee_fc.geometry(),
-                                scale=scale)
-        return img.set('date', img.date().format()).set('mean',mean)
+    # samplear la region
+    def rasterExtraction(image):
+        feature=image.sampleRegions(collection=ee_fc,scale=scale)
+        return feature
     
-    bounds = ee_fc.geometry().bounds()
-    collection = landsat_data.filterBounds(bounds)
-    collectionF = collection.select(banda).filterDate(i_date,f_date)
+    results=landsat_data.filterBounds(ee_fc).select(banda).filterDate(i_date,
+                        f_date).map(addDate).map(rasterExtraction).flatten()
+    sample_result=results.first().getInfo()
+    #extract the properties column from feature collection
+    #column order may not be as out sample data order
     
-    poi_reduced_imgs = collectionF.map(point_mean)
+    columns=list(sample_result['properties'].keys())
+    #order data columns as per sample data order
+    #You can modify this for better optimizaction
+    nested_list = results.reduceColumns(ee.Reducer.toList(len(columns)),
+                                        columns).values().get(0)
+    data=nested_list.getInfo()
+    df=pd.DataFrame(data,columns=columns)
+    df.index=pd.to_datetime(df['date'],format="%Y%m%d")
+    df=df[[x for x in df.columns if x!='date']]
+    df_pivot=pd.pivot_table(df,values=banda,index=df.index,columns=df['COD_CUENCA'])
+    print(df_pivot.head())
+    return df_pivot
     
-    nested_list = poi_reduced_imgs.reduceColumns(ee.Reducer.toList(2),
-                                            ['date','mean']).values().get(0)
-    df = pd.DataFrame(nested_list.getInfo(), columns=['date','mean'])
-    df['mean']=df['mean'].apply(lambda x: x['total_precipitation'])
-    df.set_index('date',inplace=True)  
-    df.index=pd.to_datetime(df.index)
-    return df
 
 def download(gdf,landsat_data,banda,scale,codSubcuenca,i_date,f_date):
     
@@ -97,14 +102,6 @@ def download(gdf,landsat_data,banda,scale,codSubcuenca,i_date,f_date):
         
     df_pivot.to_excel(os.path.join('.','outputs','pp_ERA5_'+codSubcuenca+'.csv'))
 
-def downloadMon(gdf,landsat_data,banda,scale,codSubcuenca,i_date,f_date):
-    
-    # subcuenca_test
-    ee_fc=feature2ee(gdf)
-    
-    df_pivot=getData(landsat_data,banda,i_date,f_date,ee_fc,scale)
-        
-    df_pivot.to_csv(os.path.join('.','outputs','pp_ERA5_'+codSubcuenca+'.csv'))
 
 def product(dict_product,i_date,f_date,banda,scale):
     
@@ -124,90 +121,11 @@ def product(dict_product,i_date,f_date,banda,scale):
         try:
             name=gdf['COD_CUENCA'][0]
             gdf.set_crs(epsg='4326',inplace=True)
-            gdf.to_file(os.path.join('.','outputs','cuenca'+name+'.shp'))
-            # yearlyMean(gdf,data,banda,scale,name)
-            # download(gdf,data,banda,scale,name,i_date,f_date)
-            downloadMon(gdf,landsat_data,banda,scale,name,i_date,f_date)
+            download(gdf,landsat_data,banda,scale,name,i_date,f_date)
         except ee.ee_exception.EEException as err:
             if 'Total request size' in str(err):
                 print('Caught')
-
-def monthlyVals(gdf,data,banda,scale,name,i_date,f_date):
-    
-    ee_fc=feature2ee(gdf)
-
-    def rasterExtraction(image):
-        feature = image.sampleRegions(collection=ee_fc,scale=scale)
-        return feature
-    
-    def addDate(image):
-        img_date = ee.Date(image.date())
-        img_date = ee.Number.parse(img_date.format('YYYYMMdd'))
-        return image.addBands(ee.Image(img_date).rename('date').toInt())
-    
-    data = data.filterDate(i_date,f_date)
-   
-    results=data.filterBounds(ee_fc).select(banda).map(addDate)\
-    .map(rasterExtraction).flatten()
-    sample_result=results.first().getInfo()
-    #extract the properties column from feature collection
-    #column order may not be as out sample data order
-    
-    columns=list(sample_result['properties'].keys())
-    
-    column_df=list(gdf.columns)
-    column_df.extend(['total_precipitation','id'])
-    nested_list = results.reduceColumns(ee.Reducer.toList(1),
-                                        ['total_precipitation']).values().get(0)
-    values = nested_list.getInfo()
-    df = pd.DataFrame(values, columns=['PP anual (m)'],
-                      index=pd.date_range(i_date,f_date,freq='MS'))
-    df.to_csv(os.path.join('.','outputs','pp_mean_yr_'+name+'.csv'))
-        
-def yearlyMean(gdf,data,banda,scale,name):
-    startYear = 1991
-    endYear = 2021
-    years = ee.List.sequence(startYear, endYear, 1)
-    
-    ee_fc=feature2ee(gdf)
-    
-    def rasterExtraction(image):
-        feature = image.sampleRegions(collection=ee_fc,scale=scale)
-        return feature
-    
-    def FeatureYear(year):
-        start = ee.Date.fromYMD(ee.Number(year), 1, 1)
-        resul = data \
-                         .filterDate(start, start.advance(1,'year')) \
-                         .filterBounds(ee_fc.geometry()) \
-                         .select(banda) \
-                         .sum() \
-                         .reduceRegion(
-                           reducer=ee.Reducer.mean(),
-                           geometry=ee_fc.geometry(),
-                           scale=scale
-                         )
-        return ee.Feature(None, resul)
-                
-    ra5_2mt = ee.FeatureCollection(years.map(FeatureYear))
-        
-    #extract the properties column from feature collection
-    #column order may not be as out sample data order
-    sample_result=ra5_2mt.first().getInfo()
-    #extract the properties column from feature collection
-    #column order may not be as out sample data order
-    
-    columns=list(sample_result['properties'].keys())
-    
-    column_df=list(gdf.columns)
-    column_df.extend(['total_precipitation','id'])
-    nested_list = ra5_2mt.reduceColumns(ee.Reducer.toList(1),
-                                        ['total_precipitation']).values().get(0)
-    data = nested_list.getInfo()
-    df = pd.DataFrame(data, columns=['PP anual (m)'],
-                      index=list(range(startYear,endYear+1)))
-    df.to_csv(os.path.join('.','outputs','pp_mean_yr_'+name+'.csv'))
-
+#%%
 def main():   
     # log in gee
     login()
@@ -217,8 +135,7 @@ def main():
     
     # process
     # sample watersheds
-    # dict_product={'ERA5':"ECMWF/ERA5/MONTHLY"}
-    dict_product={'CHIRPS':'UCSB-CHG/CHIRPS/DAILY'}
+    dict_product={'ERA5':"ECMWF/ERA5/DAILY"}
     i_date='1992-04-01'
     f_date='2021-03-31'
     banda='total_precipitation'
