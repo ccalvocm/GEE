@@ -1,0 +1,7 @@
+{
+"type": "FeatureCollection",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } },
+"features": [
+{ "type": "Feature", "properties": { "OBJECTID": 32163.0, "Id_humedal": "HU-CA-14147", "Nombre": "Laguna Grande", "Clase": "Cuerpos", "SubClase": "Laguna", "SubSubClas": null, "Ecotipo": null, "Tipo": null, "CodReg": "03", "CodProv": "033", "CodCom": "03302", "Region": "Atacama", "Provincia": "Huasco", "Comuna": "Alto Del Carmen", "CodCuenca": "038", "CodSubCuen": "0380", "CodSubSubC": "03800", "Cuenca": "Rio Huasco", "SubCuenca": "Rio Transito", "SubSubCuen": "Rio Laguna Grande", "X_este": 411488, "Y_norte": 6821471, "Datum": "WGS84", "Huso": "UTM 19S", "Lat": -28.731081008911133, "Long": -69.906394958496094, "Altitud": 3232, "Rango_alti": "3232 - 3233", "Ha_humedal": 68.617599487304688, "Nota": null, "Id_WDPA": null, "AreaProteg": null, "Nombre_AP": null, "Designacio": null, "id_numero": null, "SHAPE_Leng": 4091.3309075174393, "SHAPE_Area": 686175.95957169042 }, "geometry": { "type": "Polygon", "coordinates": [ [ [ -69.905794638418143, -28.736453670456228, 0.0 ], [ -69.911901858017387, -28.735124669613569, 0.0 ], [ -69.905726867482102, -28.724880224366323, 0.0 ], [ -69.901661862545282, -28.730772339939019, 0.0 ], [ -69.905794638418143, -28.736453670456228, 0.0 ] ] ] } }
+]
+}
