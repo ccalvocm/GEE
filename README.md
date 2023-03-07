@@ -1,2 +1,2 @@
 # GEE
-códigos personales de Google Earth Engine
+Google Earth Engine python API codes
