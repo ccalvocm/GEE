@@ -72,6 +72,20 @@ class polyEE(object):
             crs='EPSG:32719')
         return image.set('date', image.date().format()).set(mean)
     
+    def filterQA(self,image):
+        qa = image.select('NDSI_Snow_Cover_Basic_QA')
+        goodQA = qa.eq(0)
+        return image.updateMask(goodQA)
+    
+    def filterCouds(self,image):
+        clouds=image.select('NDSI_Snow_Cover_Class')
+        noClouds = clouds.neq(250)
+        return image.updateMask(noClouds)
+
+    def filterMax(self,image):
+        filterMask=image.lt(100)
+        return image.updateMask(filterMask)
+    
     def geoSeries2GeoDataFrame(self,gs):
         temp=gpd.GeoDataFrame(pd.DataFrame(gs).T)
         if 'geometry' in temp.columns:
@@ -106,33 +120,44 @@ class polyEE(object):
         treshold=dfQA_.loc[df_.index].quantile(.85)[0]
         df_=df_[dfQA_[dfQA_.columns[0]]<=treshold]
         return df_
-
+    
+    def spatialFill(self,image):
+        #function to fill spatial gaps in an image using the nearest pixels in
+        #google earth engine
+        temp=ee.Image().clip(self.ee_fc.geometry())
+        unmasked=image.unmask(temp)
+        filled=image.focal_mean(1001,'square','meters', 9)
+        join=filled.copyProperties(image, ['system:time_start'])
+        return join
+ 
     def dl(self):
         periods=10
         listPeriods=self.partitionDates(periods)
 
         idx=pd.date_range(listPeriods[0],listPeriods[-1])
         dfRet=pd.DataFrame(index=idx,columns=list(self.gdf.index))
+        dset=ee.ImageCollection(self.product)
         for ind,date in enumerate(listPeriods[:-1]):
-            dset=ee.ImageCollection(self.product)
             lista=[]
             for index in self.gdf.index:
                 gdfTemp=self.geoSeries2GeoDataFrame(self.gdf.loc[index])
                 gdfTemp=self.num2str(gdfTemp)
                 # self.ee_fc=self.gdf2FeatureCollection(gdfTemp)    
                 self.ee_fc=geemap.geopandas_to_ee(gdfTemp.set_crs(epsg='4326'))
-                res=dset.filterBounds(self.ee_fc)\
-                .select(self.band)
-                resDates=res.filterDate(ee.Date(date),
-                    ee.Date(listPeriods[ind+1])).map(self.rasterExtracion2)
-
-                df=self.ImagesToDataFrame(resDates,self.band)
                 if 'NDSI_Snow_Cover' in self.band:
+                    dset=dset.map(self.filterQA).map(self.filterCouds)
                     resQA=dset.filterBounds(self.ee_fc).select('NDSI_Snow_Cover_Basic_QA').filterDate(ee.Date(date),
 ee.Date(listPeriods[ind+1])).map(self.rasterExtracion2)
                     dfQA=self.ImagesToDataFrame(resQA,
                                                 'NDSI_Snow_Cover_Basic_QA')
+                res=dset.filterBounds(self.ee_fc).select(self.band)
+                resDates=res.filterDate(ee.Date(date),
+ee.Date(listPeriods[ind+1])).map(self.spatialFill).map(self.rasterExtracion2).map(self.filterMax)
+                df=self.ImagesToDataFrame(resDates,self.band)
+                try:
                     dfQCED=self.QA(df,dfQA)
+                except:
+                    pass
                 lista.append(dfQCED)
             lista2=self.fixColumns(lista)
             dfDate=pd.concat(lista2, axis=1, ignore_index=False)
@@ -157,7 +182,6 @@ ee.Date(listPeriods[ind+1])).map(self.rasterExtracion2)
         return (jsondate1,jsondate2)
     
     def fillColumns(self,df):
-
         df=df.fillna(method='bfill').fillna(method='ffill')
         # df=df[df.columns].fillna(df[df.columns].rolling(7,center=True,
         #                                              min_periods=1).mean())
