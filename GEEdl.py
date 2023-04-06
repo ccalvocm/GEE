@@ -8,15 +8,15 @@ import json
 import numpy as np
 
 service_account = 'srmearthenginelogin@srmlogin.iam.gserviceaccount.com'
-folder_json = os.path.join('.','interfaz_descarga_GEE',
+folder_json = os.path.join('.','auth',
                            'srmlogin-175106b08655.json')
 credentials = ee.ServiceAccountCredentials(service_account, folder_json)
 ee.Initialize(credentials)
 
 class polyEE(object):
-    def __init__(self,gdf,name,product,band,scale):
-        self.gdf=gdf.to_crs(epsg=4326)
+    def __init__(self,name,gdf,product,band,scale):
         self.name=name
+        self.gdf=gdf.to_crs(epsg=4326)
         self.product=product
         self.ee_fc=None
         self.band=band
@@ -31,7 +31,7 @@ class polyEE(object):
     
     def fixMultipoly(self,geo):
         if 'MultiPolygon' in str(type(geo.geometry.iloc[0])):
-            geo2=geo.explode().iloc[1:]
+            geo2=geo.explode()
             geo3=gpd.GeoDataFrame([],geometry=geo2.geometry,crs='4326')
             geo3['area']=''
             geo3['area']=geo3.to_crs(epsg='32719').apply(lambda x: x['geometry'].area,
@@ -39,7 +39,7 @@ class polyEE(object):
             geo3=geo3.sort_values('area',ascending=False)
             geo3=geo3.iloc[0].drop('area')
             geo3=gpd.GeoDataFrame(pd.DataFrame(geo3).T)
-            return geo3.simplify(.001).buffer(0.001)
+            return geo3.buffer(0)
         else:
             return geo
         
@@ -48,6 +48,7 @@ class polyEE(object):
         for i in range(gs.shape[0]):
             geom = gs.iloc[i:i+1,:] 
             geom=self.fixMultipoly(geom)
+            print(geom.set_crs(epsg='4326').to_crs(epsg='32719').area.apply(lambda x: f'{x:.20f}'))
             jsonDict = json.loads(geom.to_json())
             x=np.array([x[0] for x in jsonDict['features'][0]['geometry']['coordinates'][0]])
             y=np.array([x[1] for x in jsonDict['features'][0]['geometry']['coordinates'][0]])
@@ -64,6 +65,13 @@ class polyEE(object):
                                          'scale':self.scale})
         return feature
     
+    def rasterExtracion2(self,image):
+        mean = image.reduceRegion(reducer=ee.Reducer.mean(),
+            geometry=self.ee_fc.geometry(),
+            scale=self.scale,
+            crs='EPSG:32719')
+        return image.set('date', image.date().format()).set(mean)
+    
     def geoSeries2GeoDataFrame(self,gs):
         temp=gpd.GeoDataFrame(pd.DataFrame(gs).T)
         if 'geometry' in temp.columns:
@@ -76,33 +84,60 @@ class polyEE(object):
         gs[col]=gs[col].astype(str)
         return gs	
 
+    def partitionDates(self,periods=2):
+
+        datei=self.getDate()[0].format('YYYYMMdd').getInfo()
+        datef=self.getDate()[1].format('YYYYMMdd').getInfo()
+        return list(pd.date_range(start=datei,end=datef,periods=periods))
+
+    def ImagesToDataFrame(self,images,band):
+        column_df=['date',band]
+        nested_list = images.reduceColumns(ee.Reducer.toList(len(column_df)),
+                                            column_df).values().get(0)
+        data = nested_list.getInfo()
+        df = pd.DataFrame(data, columns=column_df)
+        df.index=pd.to_datetime(df['date'],format="%Y-%m-%d")
+        df=df[[x for x in df.columns if x!='date']]
+        return df
+    
+    def QA(self,df_,dfQA_):
+        df_=df_[:]
+        dfQA_=dfQA_.loc[df_.index]
+        treshold=dfQA_.loc[df_.index].quantile(.85)[0]
+        df_=df_[dfQA_[dfQA_.columns[0]]<=treshold]
+        return df_
+
     def dl(self):
-        self.idate=self.getDate()[0]
-        self.fdate=self.getDate()[1]
-        dset=ee.ImageCollection(self.product).filterDate(self.idate,
-                                                self.fdate).map(self.addDate)
-        lista=[]
-        for index in self.gdf.index:
-            print(index)
-            gdfTemp=self.geoSeries2GeoDataFrame(self.gdf.loc[index])
-            gdfTemp=self.num2str(gdfTemp)
-            self.ee_fc=self.gdf2FeatureCollection(gdfTemp)    
-            res=dset.filterBounds(self.ee_fc).select(self.band).map(self.addDate)\
-        .map(self.rasterExtraction).flatten()
-            # column_df=['name']
-            # column_df.extend([self.band,'date'])
-            column_df=[self.band,'date']
-            nested_list = res.reduceColumns(ee.Reducer.toList(len(column_df)),
-                                                column_df).values().get(0)
-            data = nested_list.getInfo()
-            df = pd.DataFrame(data, columns=column_df)
-            df.index=pd.to_datetime(df['date'],format="%Y%m%d")
-            df=df[[x for x in df.columns if x!='date']]
-            # df_pivot=pd.pivot_table(df,values=self.band,index=df.index,
-            #                         columns=df[self.band])
-            lista.append(df)
-        lista2=self.fixColumns(lista)
-        dfRet=pd.concat(lista2, axis=1, ignore_index=False)
+        periods=10
+        listPeriods=self.partitionDates(periods)
+
+        idx=pd.date_range(listPeriods[0],listPeriods[-1])
+        dfRet=pd.DataFrame(index=idx,columns=list(self.gdf.index))
+        for ind,date in enumerate(listPeriods[:-1]):
+            dset=ee.ImageCollection(self.product)
+            lista=[]
+            for index in self.gdf.index:
+                gdfTemp=self.geoSeries2GeoDataFrame(self.gdf.loc[index])
+                gdfTemp=self.num2str(gdfTemp)
+                # self.ee_fc=self.gdf2FeatureCollection(gdfTemp)    
+                self.ee_fc=geemap.geopandas_to_ee(gdfTemp.set_crs(epsg='4326'))
+                res=dset.filterBounds(self.ee_fc)\
+                .select(self.band)
+                resDates=res.filterDate(ee.Date(date),
+                    ee.Date(listPeriods[ind+1])).map(self.rasterExtracion2)
+
+                df=self.ImagesToDataFrame(resDates,self.band)
+                if 'NDSI_Snow_Cover' in self.band:
+                    resQA=dset.filterBounds(self.ee_fc).select('NDSI_Snow_Cover_Basic_QA').filterDate(ee.Date(date),
+ee.Date(listPeriods[ind+1])).map(self.rasterExtracion2)
+                    dfQA=self.ImagesToDataFrame(resQA,
+                                                'NDSI_Snow_Cover_Basic_QA')
+                    dfQCED=self.QA(df,dfQA)
+                lista.append(dfQCED)
+            lista2=self.fixColumns(lista)
+            dfDate=pd.concat(lista2, axis=1, ignore_index=False)
+            dfRet.loc[dfDate.index,:]=dfDate.values
+        
         return dfRet
     
     def fixColumns(self,lista):
@@ -122,16 +157,18 @@ class polyEE(object):
         return (jsondate1,jsondate2)
     
     def fillColumns(self,df):
-        df=df[df.columns].fillna(df[df.columns].rolling(60,center=False,
-                                                     min_periods=1).mean())
-        return df
 
+        df=df.fillna(method='bfill').fillna(method='ffill')
+        # df=df[df.columns].fillna(df[df.columns].rolling(7,center=True,
+        #                                              min_periods=1).mean())
+        return df
     
-def main():
+def main3():
     path=r'G:\OneDrive - ciren.cl\2022_ANID_sequia\Proyecto\SIG\Cuencas\subcNClimari.shp'
+    path=r'G:\OneDrive - ciren.cl\Ficha_16_Coquimbo\02_SIG\02_Aguas sup\04_Regional\cuencas_cabecera\Rio Hurtado En San Agustin\bands4calhypso_fix.shp'
     gdfCuenca=gpd.read_file(path)
     # gdfCuenca=gpd.GeoDataFrame(pd.DataFrame(gdf.iloc[0]).T)
-    cuenca=polyEE(gdfCuenca,'MODIS/006/MOD10A1','NDSI_Snow_Cover',500,'2000-02-24','2023-02-17')
+    cuenca=polyEE(gdfCuenca,'MODIS/006/MOD10A1','NDSI_Snow_Cover',500)
     df=cuenca.dl()
 
     product='IDAHO_EPSCOR/TERRACLIMATE'
@@ -146,15 +183,13 @@ def main():
     dfOut=dfOut.divide(dfOut.index.days_in_month,axis=0)
     dfOut.to_csv(r'G:\OneDrive - ciren.cl\2022_ANID_sequia\Proyecto\3_Objetivo3\Modelos\insumosWEAP\qPunitaquiIngenioPonio.csv')
 
-if __name__=='__main__':
-    pth=r'G:\OneDrive - ciren.cl\Ficha_16_Coquimbo\02_SIG\02_Aguas sup\04_Regional\cuencas_cabecera\Rio Hurtado En San Agustin\bands4calhypso_fix.shp'
     name='Hurtado_San_Agustin'
     pth=os.path.join('..',name,'glacierBands.shp')
-    pth=r'G:\OneDrive - ciren.cl\Ficha_16_Coquimbo\02_SIG\02_Aguas sup\04_Regional\cuencas_cabecera\Rio Hurtado En San Agustin\basin4calhypso.shp'
-    gdfCuenca=gpd.read_file(pth).set_index('FID')
-    bf=polyEE(gdfCuenca,name,'NASA/FLDAS/NOAH01/C/GL/M/V001','Qsb_tavg',11132)
-    terra=polyEE(gdfCuenca,name,'MODIS/006/MYD10A1','NDSI_Snow_Cover',500)
-    aqua=polyEE(gdfCuenca,name,'MODIS/006/MOD10A1','NDSI_Snow_Cover',500)
+    pth=r'G:\OneDrive - ciren.cl\Ficha_16_Coquimbo\02_SIG\02_Aguas sup\04_Regional\cuencas_cabecera\Rio Hurtado En San Agustin\bands4calhypso_fix.shp'
+    gdfCuenca=gpd.read_file(pth)
+    # bf=polyEE(gdfCuenca,name,'NASA/FLDAS/NOAH01/C/GL/M/V001','Qsb_tavg',11132)
+    terra=polyEE(name,gdfCuenca,'MODIS/006/MYD10A1','NDSI_Snow_Cover',500)
+    aqua=polyEE(name,gdfCuenca,'MODIS/006/MOD10A1','NDSI_Snow_Cover',500)
     
     # bajar terra
     dfTerra=terra.fillColumns(terra.dl())
@@ -164,18 +199,19 @@ if __name__=='__main__':
     
     # resultados
     dfOut=dfTerra.combine_first(dfAqua)
-    dfOut.columns=[x-1 for x in list(gdfCuenca.index)]
+    # dfOut.columns=[x-1 for x in list(gdfCuenca.index)]
     
     # rellenar el df
     dfAll=pd.DataFrame(np.nan,index=pd.date_range('2000-01-01',
                             dfOut.index.max(),freq='D'),
                             columns=dfOut.columns)
-    dfAllGlacier=dfAll.copy()
     dfAll.loc[dfOut.index,dfOut.columns]=dfOut.values
 
     dfAll=terra.fillColumns(dfAll)
-    dfOut=dfAll.fillna(100)
+    dfOut=dfAll.fillna(0)
     dfOut=dfOut/100.
 
     dfOut.to_csv(os.path.join('..',name,'glacierCover.csv' ))
-    # main()
+
+if __name__=='__main__':
+    main()
