@@ -78,8 +78,8 @@ class polyEE(object):
         return image.updateMask(goodQA)
     
     def filterCouds(self,image):
-        clouds=image.select('NDSI_Snow_Cover_Class')
-        noClouds = clouds.neq(250)
+        clouds=image.select('Snow_Albedo_Daily_Tile_Class')
+        noClouds = clouds.neq(150)
         return image.updateMask(noClouds)
 
     def filterMax(self,image):
@@ -126,12 +126,12 @@ class polyEE(object):
         #google earth engine
         temp=ee.Image().clip(self.ee_fc.geometry())
         unmasked=image.unmask(temp)
-        filled=image.focal_mean(1001,'square','meters', 9)
+        filled=image.focal_mean(1001,'square','meters', 3)
         join=filled.copyProperties(image, ['system:time_start'])
         return join
  
     def dl(self):
-        periods=10
+        periods=15
         listPeriods=self.partitionDates(periods)
 
         idx=pd.date_range(listPeriods[0],listPeriods[-1])
@@ -145,7 +145,7 @@ class polyEE(object):
                 # self.ee_fc=self.gdf2FeatureCollection(gdfTemp)    
                 self.ee_fc=geemap.geopandas_to_ee(gdfTemp.set_crs(epsg='4326'))
                 if 'NDSI_Snow_Cover' in self.band:
-                    dset=dset.map(self.filterQA).map(self.filterCouds)
+                    dset=ee.ImageCollection(self.product).map(self.filterQA)
                     resQA=dset.filterBounds(self.ee_fc).select('NDSI_Snow_Cover_Basic_QA').filterDate(ee.Date(date),
 ee.Date(listPeriods[ind+1])).map(self.rasterExtracion2)
                     dfQA=self.ImagesToDataFrame(resQA,
