@@ -41,14 +41,13 @@ class polyEE(object):
             geo3=gpd.GeoDataFrame(pd.DataFrame(geo3).T)
             return geo3.buffer(0)
         else:
-            return geo
+            return geo.simplify(0.05)
         
     def gdf2FeatureCollection(self,gs):
         features = []
         for i in range(gs.shape[0]):
             geom = gs.iloc[i:i+1,:] 
             geom=self.fixMultipoly(geom)
-            print(geom.set_crs(epsg='4326').to_crs(epsg='32719').area.apply(lambda x: f'{x:.20f}'))
             jsonDict = json.loads(geom.to_json())
             x=np.array([x[0] for x in jsonDict['features'][0]['geometry']['coordinates'][0]])
             y=np.array([x[1] for x in jsonDict['features'][0]['geometry']['coordinates'][0]])
@@ -69,7 +68,7 @@ class polyEE(object):
         mean = image.reduceRegion(reducer=ee.Reducer.mean(),
             geometry=self.ee_fc.geometry(),
             scale=self.scale,
-            crs='EPSG:32719')
+            bestEffort=True)
         return image.set('date', image.date().format()).set(mean)
     
     def filterQA(self,image):
@@ -117,8 +116,8 @@ class polyEE(object):
     def QA(self,df_,dfQA_):
         df_=df_[:]
         dfQA_=dfQA_.loc[df_.index]
-        treshold=dfQA_.loc[df_.index].quantile(.85)[0]
-        df_=df_[dfQA_[dfQA_.columns[0]]<=treshold]
+        treshold=dfQA_.loc[df_.index].quantile(.75)[0]
+        df_=df_[dfQA_[dfQA_.columns[0]]<=treshold*0]
         return df_
     
     def spatialFill(self,image):
@@ -126,25 +125,37 @@ class polyEE(object):
         #google earth engine
         temp=ee.Image().clip(self.ee_fc.geometry())
         unmasked=image.unmask(temp)
-        filled=image.focal_mean(1001,'square','meters', 3)
+        filled=image.focalMean(501,'square','meters', 3)
+        # filled=image.focalMean(1,'square','pixels', 3)
         join=filled.copyProperties(image, ['system:time_start'])
         return join
- 
+    
+    def countImage(self,image):
+        count=image.reduceRegion(ee.Reducer.count(),self.ee_fc.geometry(),
+                                  self.scale,bestEffort=True)
+        return image.set('date', image.date().format()).set(count)
+
     def dl(self):
         periods=15
         listPeriods=self.partitionDates(periods)
 
         idx=pd.date_range(listPeriods[0],listPeriods[-1])
         dfRet=pd.DataFrame(index=idx,columns=list(self.gdf.index))
+        dfRetC=pd.DataFrame(index=idx,columns=list(self.gdf.index))
         dset=ee.ImageCollection(self.product)
         for ind,date in enumerate(listPeriods[:-1]):
             lista=[]
+            listaCount=[]
             for index in self.gdf.index:
                 gdfTemp=self.geoSeries2GeoDataFrame(self.gdf.loc[index])
                 gdfTemp=self.num2str(gdfTemp)
                 # self.ee_fc=self.gdf2FeatureCollection(gdfTemp)    
                 self.ee_fc=geemap.geopandas_to_ee(gdfTemp.set_crs(epsg='4326'))
                 if 'NDSI_Snow_Cover' in self.band:
+                    resCount=dset.filterBounds(self.ee_fc).select(self.band)
+                    resDatesC=resCount.filterDate(ee.Date(date),
+    ee.Date(listPeriods[ind+1])).map(self.spatialFill).map(self.countImage)
+                    dfCount=self.ImagesToDataFrame(resDatesC,self.band)
                     dset=ee.ImageCollection(self.product).map(self.filterQA)
                     resQA=dset.filterBounds(self.ee_fc).select('NDSI_Snow_Cover_Basic_QA').filterDate(ee.Date(date),
 ee.Date(listPeriods[ind+1])).map(self.rasterExtracion2)
@@ -155,15 +166,20 @@ ee.Date(listPeriods[ind+1])).map(self.rasterExtracion2)
 ee.Date(listPeriods[ind+1])).map(self.spatialFill).map(self.rasterExtracion2).map(self.filterMax)
                 df=self.ImagesToDataFrame(resDates,self.band)
                 try:
-                    dfQCED=self.QA(df,dfQA)
+                    df=self.QA(df,dfQA)
                 except:
                     pass
-                lista.append(dfQCED)
+                lista.append(df)
+                listaCount.append(dfCount)
             lista2=self.fixColumns(lista)
+            lista3=self.fixColumns(listaCount)
+
             dfDate=pd.concat(lista2, axis=1, ignore_index=False)
+            dfDateCount=pd.concat(lista3, axis=1, ignore_index=False)
             dfRet.loc[dfDate.index,:]=dfDate.values
-        
-        return dfRet
+            dfRetC.loc[dfDateCount.index,:]=dfDateCount.values
+
+        return dfRet,dfRetC
     
     def fixColumns(self,lista):
         lista2=[]
@@ -216,10 +232,10 @@ def main3():
     aqua=polyEE(name,gdfCuenca,'MODIS/006/MOD10A1','NDSI_Snow_Cover',500)
     
     # bajar terra
-    dfTerra=terra.fillColumns(terra.dl())
+    dfTerra,dfCount=terra.dl()
 
     # bajar aqua
-    dfAqua=aqua.fillColumns(aqua.dl())
+    dfAqua=aqua.dl()
     
     # resultados
     dfOut=dfTerra.combine_first(dfAqua)
