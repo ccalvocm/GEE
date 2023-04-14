@@ -113,7 +113,7 @@ class polyEE(dsetEE):
         gs[col]=gs[col].astype(str)
         return gs	
 
-    def partitionDates(self,periods=2):
+    def partitionDates(self):
         datei=self.idate
         datef=self.fdate
         months=round((datef-datei).days/30)+1
@@ -151,8 +151,7 @@ class polyEE(dsetEE):
         return image.set('date', image.date().format()).set(count)
 
     def dl(self):
-        periods=20
-        listPeriods=self.partitionDates(periods)
+        listPeriods=self.partitionDates()
 
         idx=pd.date_range(listPeriods[0],listPeriods[-1])
         dfRet=pd.DataFrame(index=idx,columns=list(self.gdf.index))
@@ -184,11 +183,11 @@ ee.Date(listPeriods[ind+1])).map(self.spatialFill).map(self.rasterExtracion2)
             lista3=self.fixColumns(listaCount)
 
             dfDate=pd.concat(lista2, axis=1, ignore_index=False)
-            dfDateCount=pd.concat(lista3, axis=1, ignore_index=False)
             dfRet.loc[dfDate.index,:]=dfDate.values
-            dfRetC.loc[dfDateCount.index,:]=dfDateCount.values
 
         if 'NDSI_Snow_Cover' in self.band:
+            dfDateCount=pd.concat(lista3, axis=1, ignore_index=False)
+            dfRetC.loc[dfDateCount.index,:]=dfDateCount.values
             dfRet=self.filterCount(dfRet,dfRetC.astype(float))
 
         return dfRet
@@ -266,46 +265,59 @@ def main():
             gdfCuenca=loadGdf(name,'bands')
             for data in list(dsets.keys()):
                 for band in dsets[data]:
-                    polygon=polyEE(name,gdfCuenca,data,band,idate=lastDate,
-                    fdate=mindate)
-                    df=polygon.dl()
                     if 'precipitation' in band:
                         pathOut=os.path.join('..',name,'Precipitacion',
                         'PrecipitacionActualizada.csv')
+                        polygon=polyEE(name,gdfCuenca,data,band,idate=lastDate,
+                    fdate=mindate+pd.DateOffset(1))
+                        df=polygon.dl().iloc[:-1,:]
                     elif 'temperature' in band:
                         pathOut=os.path.join('..',name,'Temperatura',
                         'TemperaturaActualizada.csv')
+                        polygon=polyEE(name,gdfCuenca,data,band,idate=lastDate,
+                    fdate=mindate+pd.DateOffset(1))
+                        df=polygon.dl().iloc[:-1,:]
                     elif 'MOD10A1' in data:
-                        assert False
+                        polygon=polyEE(name,gdfCuenca,data,band,idate=lastDate,
+                    fdate=mindate)
+                        df=polygon.dl()
                         dfTerra=df[:]
+                        continue
                     elif 'MYD10A1' in data:
-                        dfAqua=df[:]
-                            # resultados
+                        polygon=polyEE(name,gdfCuenca,data,band,idate=lastDate,
+                    fdate=mindate)
+                        dfAqua=polygon.dl()
+                        # resultados
                         dfOut=dfTerra.combine_first(dfAqua)
                         # postprocesar
-                        dfOut=postProcess(dfOut)
-                        dfOut.to_csv(os.path.join('..',name,'snowCover.csv' ))
-
-                    pathOut=os.path.join('..',name,data+'_'+band+'.csv')
-                df.to_csv(pathOut)
+                        dfOut=postProcess(polygon,dfOut)
+                        dfOut.to_csv(os.path.join('..',name,'Nieve','snowCover.csv' ))
+                        continue
+                    else:
+                        pathOut=os.path.join('..',name,data.replace('/',
+                        '_')+'_'+band+'.csv')
+                        polygon=polyEE(name,gdfCuenca,data,band,idate=lastDate,
+                    fdate=mindate)
+                        df=polygon.dl().iloc[:-1,:]
+                    print(pathOut)
+                    df.to_csv(pathOut)
             
             # ahora bajar cobertura de glaciares
             gdfCuenca=loadGdf(name,'glacierBands')
             for data in list(dsets.keys()):
                 if 'MOD10A1' in data:
-                    for band in dsets[data]:
-                        polygon=polyEE(name,gdfCuenca,data,band,idate=lastDate,
+                        polygon=polyEE(name,gdfCuenca,data,dsets[data][0],idate=lastDate,
                     fdate=mindate)
                         dfTerra=polygon.dl()
                 elif 'MYD10A1' in data:
-                    for band in dsets[data]:
-                        polygon=polyEE(name,gdfCuenca,data,band,idate=lastDate,
+                        polygon=polyEE(name,gdfCuenca,data,dsets[data][0],idate=lastDate,
                     fdate=mindate)
                         dfAqua=polygon.dl()
                         dfOut=dfTerra.combine_first(dfAqua)
                         # postprocesar
-                        dfOut=postProcess(dfOut)
-                        dfOut.to_csv(os.path.join('..',name,'snowCover.csv' ))                    
+                        dfOut=postProcess(polygon,dfOut)
+                        dfOut.to_csv(os.path.join('..',name,'Nieve',
+                        'glacierCover.csv' ))                    
         return None
 
     getDatesDatasets()
