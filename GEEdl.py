@@ -2,7 +2,6 @@ import ee
 import os
 import pandas as pd
 import datetime
-import geemap
 import geopandas as gpd
 import json
 import numpy as np
@@ -46,7 +45,7 @@ class polyEE(dsetEE):
         return image.addBands(ee.Image(img_date).rename('date').toInt())
     
     def fixMultipoly(self,geo):
-        if 'MultiPolygon' in str(type(geo.geometry.iloc[0])):
+        if 'MultiPolygon' in geo.geometry.iloc[0].geom_type:
             geo2=geo.explode()
             geo3=gpd.GeoDataFrame([],geometry=geo2.geometry,crs='4326')
             geo3['area']=''
@@ -125,7 +124,7 @@ class polyEE(dsetEE):
                                             column_df).values().get(0)
         data = nested_list.getInfo()
         df = pd.DataFrame(data, columns=column_df)
-        df.index=pd.to_datetime(df['date'],format="%Y-%m-%d")
+        df.index=pd.to_datetime(df['date'])
         df=df[[x for x in df.columns if x!='date']]
         return df
     
@@ -174,8 +173,10 @@ class polyEE(dsetEE):
                     dfCount=self.ImagesToDataFrame(resDatesC,self.band)
                     listaCount.append(dfCount)
                 res=dset.filterBounds(self.ee_fc.geometry()).select(self.band)
+#                 resDates=res.filterDate(ee.Date(date),
+# ee.Date(listPeriods[ind+1])).map(self.spatialFill).map(self.rasterExtracion2)\
                 resDates=res.filterDate(ee.Date(date),
-ee.Date(listPeriods[ind+1])).map(self.spatialFill).map(self.rasterExtracion2)
+ee.Date(listPeriods[ind+1])).map(self.rasterExtracion2)
                 df=self.ImagesToDataFrame(resDates,self.band)
 
                 lista.append(df)
@@ -185,9 +186,12 @@ ee.Date(listPeriods[ind+1])).map(self.spatialFill).map(self.rasterExtracion2)
             dfDate=pd.concat(lista2, axis=1, ignore_index=False)
             dfRet.loc[dfDate.index,:]=dfDate.values
 
+            if len(lista3):
+                dfDateCount=pd.concat(lista3, axis=1, ignore_index=False)
+                dfRetC.loc[dfDateCount.index,:]=dfDateCount.values
+                
+            # filtrar los datos sin nieve
         if 'NDSI_Snow_Cover' in self.band:
-            dfDateCount=pd.concat(lista3, axis=1, ignore_index=False)
-            dfRetC.loc[dfDateCount.index,:]=dfDateCount.values
             dfRet=self.filterCount(dfRet,dfRetC.astype(float))
 
         return dfRet
@@ -215,10 +219,10 @@ ee.Date(listPeriods[ind+1])).map(self.spatialFill).map(self.rasterExtracion2)
         return df
 
     def filterCount(self,df1,df2):
-        mask=df2>df2.astype(float).describe().loc['mean']*1.1
+        mask=df2>df2.astype(float).describe().loc['mean']
         return df1[mask]
 
-def main():
+def main(name='Hurtado_San_Agustin'):
     def getLastDate(name):
         path=os.path.join('..',name,'Master.csv')
         master=pd.read_csv(path,index_col=0,parse_dates=True)
@@ -230,7 +234,7 @@ def main():
         'temperature_2m'],'MODIS/006/MOD10A1':['NDSI_Snow_Cover'],
         'MODIS/006/MYD10A1':['NDSI_Snow_Cover']
         }
-        mindate=datetime.date.today()
+        mindate=pd.to_datetime(datetime.date.today())
 
         for data in list(dsets.keys()):
             dataset=dsetEE(data)
@@ -244,7 +248,7 @@ def main():
 
     def postProcess(polygon,df):
         # poblar el df
-        dfAll=pd.DataFrame(np.nan,index=pd.date_range('2000-01-01',
+        dfAll=pd.DataFrame(np.nan,index=pd.date_range(df.index.min(),
                                 df.index.max(),freq='D'),
                                 columns=df.columns)
         dfAll.loc[df.index,df.columns]=df.values
@@ -291,7 +295,8 @@ def main():
                         dfOut=dfTerra.combine_first(dfAqua)
                         # postprocesar
                         dfOut=postProcess(polygon,dfOut)
-                        dfOut.to_csv(os.path.join('..',name,'Nieve','snowCover.csv' ))
+                        dfOut.to_csv(os.path.join('..',name,'Nieve',
+                                                  'snowCoverActualizada.csv' ))
                         continue
                     else:
                         pathOut=os.path.join('..',name,data.replace('/',
@@ -299,7 +304,6 @@ def main():
                         polygon=polyEE(name,gdfCuenca,data,band,idate=lastDate,
                     fdate=mindate)
                         df=polygon.dl().iloc[:-1,:]
-                    print(pathOut)
                     df.to_csv(pathOut)
             
             # ahora bajar cobertura de glaciares
@@ -317,12 +321,12 @@ def main():
                         # postprocesar
                         dfOut=postProcess(polygon,dfOut)
                         dfOut.to_csv(os.path.join('..',name,'Nieve',
-                        'glacierCover.csv' ))                    
+                        'glacierCoverActualizada.csv' ))                    
         return None
 
-    getDatesDatasets()
+    getDatesDatasets(name)
     
-def main3():
+def terraClimate():
     path=r'G:\OneDrive - ciren.cl\2022_ANID_sequia\Proyecto\SIG\Cuencas\subcNClimari.shp'
     path=r'G:\OneDrive - ciren.cl\Ficha_16_Coquimbo\02_SIG\02_Aguas sup\04_Regional\cuencas_cabecera\Rio Hurtado En San Agustin\bands4calhypso_fix.shp'
     gdfCuenca=gpd.read_file(path)
@@ -341,16 +345,6 @@ def main3():
                                  1)/(86400000)
     dfOut=dfOut.divide(dfOut.index.days_in_month,axis=0)
     dfOut.to_csv(r'G:\OneDrive - ciren.cl\2022_ANID_sequia\Proyecto\3_Objetivo3\Modelos\insumosWEAP\qPunitaquiIngenioPonio.csv')
-
-    name='Hurtado_San_Agustin'
-    pth=os.path.join('..',name,'glacierBands.shp')
-    pth=r'G:\OneDrive - ciren.cl\Ficha_16_Coquimbo\02_SIG\02_Aguas sup\04_Regional\cuencas_cabecera\Rio Hurtado En San Agustin\bands4calhypso_fix.shp'
-    gdfCuenca=gpd.read_file(pth)
-    # bf=polyEE(gdfCuenca,name,'NASA/FLDAS/NOAH01/C/GL/M/V001','Qsb_tavg',11132)
-    terra=polyEE(name,gdfCuenca,'MODIS/006/MYD10A1','NDSI_Snow_Cover')
-    aqua=polyEE(name,gdfCuenca,'MODIS/006/MOD10A1','NDSI_Snow_Cover')
-       
-
 
 if __name__=='__main__':
     main()
