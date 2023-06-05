@@ -152,7 +152,7 @@ class polyEE(dsetEE):
     def dl(self):
         listPeriods=self.partitionDates()
 
-        idx=pd.date_range(listPeriods[0],listPeriods[-1])
+        idx=pd.date_range(listPeriods[0],listPeriods[-1],freq='H')
         dfRet=pd.DataFrame(index=idx,columns=list(self.gdf.index))
         dfRetC=pd.DataFrame(index=idx,columns=list(self.gdf.index))
         dset=ee.ImageCollection(self.product)
@@ -203,15 +203,19 @@ ee.Date(listPeriods[ind+1])).map(self.rasterExtracion2)
             df = df.loc[~df.index.duplicated(keep='first')]
             lista2.append(df)
         return lista2
-
-    # def getDate(self):
-    #     collection = ee.ImageCollection(self.product)
-    #     date_range = collection.reduceColumns(ee.Reducer.minMax(),
-    #                                       ['system:time_start'])
-    #     jsondate1 = ee.Date(date_range.get('min'))
-    #     jsondate2 = ee.Date(date_range.get('max'))
-    #     return (jsondate1,jsondate2)
     
+    def autocompleteCol(self,df):
+        colsNotna=df.dropna(how='all',axis=1).columns
+        colsNa=[x for x in df.columns if x not in colsNotna]
+        dfOut=df[:]
+        if len(colsNa)>0:
+            for col in colsNa:
+                if col<colsNotna.min():
+                    dfOut[col]=df[colsNotna[colsNotna>col].min()]
+                else:
+                    dfOut[col]=df[colsNotna[colsNotna<col].max()]
+        return dfOut
+
     def fillColumns(self,df):
         df=df.fillna(method='bfill').fillna(method='ffill')
         # df=df[df.columns].fillna(df[df.columns].rolling(7,center=True,
@@ -328,16 +332,18 @@ def main(name='Hurtado_San_Agustin'):
     
 def terraClimate():
     path=r'G:\OneDrive - ciren.cl\2022_ANID_sequia\Proyecto\SIG\Cuencas\subcNClimari.shp'
-    path=r'G:\OneDrive - ciren.cl\Ficha_16_Coquimbo\02_SIG\02_Aguas sup\04_Regional\cuencas_cabecera\Rio Hurtado En San Agustin\bands4calhypso_fix.shp'
+    path=r'G:\sequia\data\Cogoti_Embalse_Cogoti\basin4calhypso.shp'
     gdfCuenca=gpd.read_file(path)
     # gdfCuenca=gpd.GeoDataFrame(pd.DataFrame(gdf.iloc[0]).T)
     cuenca=polyEE(gdfCuenca,'MODIS/006/MOD10A1','NDSI_Snow_Cover',500)
     df=cuenca.dl()
 
-    product='IDAHO_EPSCOR/TERRACLIMATE'
-    band='ro'
-    scale=11132
-    cuenca=polyEE(gdfCuenca,product,band,scale)
+    product="NASA/GLDAS/V021/NOAH/G025/T3H"
+    band='Qsb_acc'
+    scale=27830 
+    datei=pd.to_datetime('2000-01-01')
+    datef=pd.to_datetime('2023-04-12')
+    cuenca=polyEE('Cogoti',gdfCuenca,product,band,datei,datef)
     df=cuenca.dl()
     df.plot()
     dfOut=df.pivot_table(index='date',columns='name',
